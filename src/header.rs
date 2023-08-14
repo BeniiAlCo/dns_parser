@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //                                   1  1  1  1  1  1
 //     0  1  2  3  4  5  6  7  8  9  0  1  2  3  4  5
 //   +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
@@ -15,43 +16,86 @@
 //    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
 use nom::{
-    bits::{
-        bits,
-        complete::{bool, take},
-    },
-    combinator::{flat_map, verify},
-    error::Error,
+    bits::complete::{bool, take},
+    combinator::verify,
     number::complete::be_u16,
-    sequence::{pair, tuple},
-    FlatMap, IResult, Parser,
+    IResult,
 };
 
 struct Header {
     id: u16,
-    qr: bool,
-    opcode: u8,
-    aa: bool,
-    tc: bool,
-    rd: bool,
-    ra: bool,
-    z: u8,
-    rcode: u8,
+    flags: Flags,
     qd_count: u16,
     an_count: u16,
     ns_count: u16,
     ar_count: u16,
 }
 
+struct Flags {
+    query_response: QueryResponse,
+    opcode: OpCode,
+    authoritative_answer: bool,
+    truncation: bool,
+    recursion_denied: bool,
+    recursion_avaliable: bool,
+    // z - "Reserved for future use. Must be zero in all queries and responses" RFC1035
+    response_code: ResponseCode,
+}
+
+#[derive(Debug, PartialEq)]
+enum QueryResponse {
+    Query,
+    Response,
+}
+
+#[derive(Debug, PartialEq)]
+enum OpCode {
+    Query,
+    InverseQuery,
+    ServerStatusRequest,
+    Reserved(u8),
+}
+
+#[derive(Debug, PartialEq)]
+enum ResponseCode {
+    NoError,
+    FormatError,    // name server unable to interpret query
+    ServerFailure,  // name server unable to process query due to internal error
+    NameError,      // if from an authoritative name server, the queried name does not exist
+    NotImplemented, // queried name server does not support request
+    Refused,        // queried name server refuses request for policy reasons.
+    Reserved(u8),
+}
+
 fn id(input: &[u8]) -> IResult<&[u8], u16> {
     be_u16(input)
 }
 
-fn qr(input: (&[u8], usize)) -> IResult<(&[u8], usize), bool> {
-    bool(input)
+fn qr(input: (&[u8], usize)) -> IResult<(&[u8], usize), QueryResponse> {
+    bool(input).map(|(remaining, qr)| {
+        (
+            remaining,
+            match qr {
+                true => QueryResponse::Response,
+                false => QueryResponse::Query,
+            },
+        )
+    })
 }
 
-fn opcode(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    verify(take(4usize), |opcode: &u8| (0..16).contains(opcode))(input)
+fn opcode(input: (&[u8], usize)) -> IResult<(&[u8], usize), OpCode> {
+    take(4usize)(input).map(|(remaining, opcode)| {
+        (
+            remaining,
+            match opcode {
+                0 => OpCode::Query,
+                1 => OpCode::InverseQuery,
+                2 => OpCode::ServerStatusRequest,
+                x if (3..16).contains(&x) => OpCode::Reserved(x),
+                _ => unreachable!(),
+            },
+        )
+    })
 }
 
 fn aa(input: (&[u8], usize)) -> IResult<(&[u8], usize), bool> {
@@ -66,30 +110,36 @@ fn rd(input: (&[u8], usize)) -> IResult<(&[u8], usize), bool> {
     bool(input)
 }
 
-fn qr_opcode_aa_tc_rd(input: &[u8]) -> IResult<&[u8], (bool, u8, bool, bool, bool)> {
-    bits::<_, _, Error<(&[u8], usize)>, _, _>(tuple((qr, opcode, aa, tc, rd)))(input)
-}
-
 fn ra(input: (&[u8], usize)) -> IResult<(&[u8], usize), bool> {
     bool(input)
 }
 
 fn z(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    take(3usize)(input)
+    verify(take(3usize), |z: &u8| z == &0)(input)
 }
 
-fn rcode(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
-    take(4usize)(input)
+fn rcode(input: (&[u8], usize)) -> IResult<(&[u8], usize), ResponseCode> {
+    take(4usize)(input).map(|(remaining, rcode)| {
+        (
+            remaining,
+            match rcode {
+                0 => ResponseCode::NoError,
+                1 => ResponseCode::FormatError,
+                2 => ResponseCode::ServerFailure,
+                3 => ResponseCode::NameError,
+                4 => ResponseCode::NotImplemented,
+                5 => ResponseCode::Refused,
+                x if (6..16).contains(&x) => ResponseCode::Reserved(x),
+                _ => unreachable!(),
+            },
+        )
+    })
 }
 
-fn ra_z_rcode(input: &[u8]) -> IResult<&[u8], (bool, u8, u8)> {
-    bits::<_, _, Error<(&[u8], usize)>, _, _>(tuple((ra, z, rcode)))(input)
-}
-
-fn flags(input: &[u8]) -> IResult<&[u8], (bool, u8, bool, bool, bool, bool, u8, u8)> {
-    pair(qr_opcode_aa_tc_rd, ra_z_rcode)(input)
-        .map(|(remaining, ((a, b, c, d, e), (f, g, h)))| (remaining, (a, b, c, d, e, f, g, h)))
-}
+//fn flags(input: &[u8]) -> IResult<&[u8], (bool, u8, bool, bool, bool, bool, u8, u8)> {
+//    pair(qr_opcode_aa_tc_rd, ra_z_rcode)(input)
+//        .map(|(remaining, ((a, b, c, d, e), (f, g, h)))| (remaining, (a, b, c, d, e, f, g, h)))
+//}
 
 fn qd_count(input: &[u8]) -> IResult<&[u8], u16> {
     be_u16(input)
@@ -125,7 +175,10 @@ mod tests {
         #[test]
         fn qr(a in [arb_qr()]) {
             if let Ok(((remaining, ptr), qr)) = super::qr((&a, 0)) {
-                prop_assert_eq!(qr, a[0] != 0) ;
+                prop_assert_eq!(qr, match a[0] != 0 {
+                    true => super::QueryResponse::Response,
+                    false => super::QueryResponse::Query,
+        }) ;
                 prop_assert_eq!(remaining, a);
                 prop_assert_eq!(ptr, 1);
             }
@@ -136,7 +189,13 @@ mod tests {
         #[test]
         fn opcode(a in [arb_opcode()]) {
             if let Ok(((remaining, ptr), opcode)) = super::opcode((&a, 1)) {
-                prop_assert_eq!(opcode, a[0] >> 3);
+                prop_assert_eq!(opcode, match a[0] >> 3 {
+                    0 => super::OpCode::Query,
+                    1 => super::OpCode::InverseQuery,
+                    2 => super::OpCode::ServerStatusRequest,
+                    x if (3..16).contains(&x) => crate::header::OpCode::Reserved(x),
+                    _ => unreachable!(),
+        });
                 prop_assert_eq!(remaining, a);
                 prop_assert_eq!(ptr, 5);
             }
@@ -194,6 +253,8 @@ mod tests {
                 prop_assert_eq!(z, a[0] >> 4);
                 prop_assert_eq!(remaining, a);
                 prop_assert_eq!(ptr, 4);
+            } else {
+                prop_assert!((a[0] >> 4) > 0);
             }
         }
     }
@@ -202,74 +263,49 @@ mod tests {
         #[test]
         fn rcode(a in [arb_rcode()]) {
             if let Ok(((remaining, ptr), rcode)) = super::rcode((&a, 4)) {
-                prop_assert_eq!(rcode, a[0]);
+                prop_assert_eq!(rcode, match a[0] {
+                0 => super::ResponseCode::NoError,
+                1 => super::ResponseCode::FormatError,
+                2 => super::ResponseCode::ServerFailure,
+                3 => super::ResponseCode::NameError,
+                4 => super::ResponseCode::NotImplemented,
+                5 => super::ResponseCode::Refused,
+                x if (6..16).contains(&x) => super::ResponseCode::Reserved(x),
+                _ => unreachable!(),
+        });
                 prop_assert!(remaining.is_empty());
                 prop_assert_eq!(ptr,0);
             }
         }
     }
 
-    proptest! {
-        #[test]
-        fn first_flags_byte(
-            a in arb_qr(),
-            b in arb_opcode(),
-            c in arb_aa(),
-            d in arb_tc(),
-            e in arb_rd())
-        {
-            let f = [a | b | c | d | e];
-            if let Ok((remaining, (qr, opcode, aa, tc, rd))) = super::qr_opcode_aa_tc_rd(&f) {
-                prop_assert_eq!(qr, a != 0);
-                prop_assert_eq!(opcode, b >> 3);
-                prop_assert_eq!(aa, c != 0) ;
-                prop_assert_eq!(tc, d != 0) ;
-                prop_assert_eq!(rd, e != 0) ;
-                prop_assert!(remaining.is_empty());
-            }
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn second_flags_byte(a in arb_ra(), b in arb_z(), c in arb_rcode()) {
-            let f = [a | b | c];
-            if let Ok((remaining, (ra, z, rcode))) = super::ra_z_rcode(&f) {
-                prop_assert_eq!(ra, a != 0);
-                prop_assert_eq!(z, b >> 4);
-                prop_assert_eq!(rcode, c) ;
-                prop_assert!(remaining.is_empty());
-            }
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn flags_bytes(
-            a in arb_qr(),
-            b in arb_opcode(),
-            c in arb_aa(),
-            d in arb_tc(),
-            e in arb_rd(),
-            f in arb_ra(),
-            g in arb_z(),
-            h in arb_rcode())
-        {
-            let i = [a | b | c | d | e | f | g | h];
-            if let Ok((remaining, (qr, opcode, aa, tc, rd, ra, z, rcode))) = super::flags(&i) {
-                prop_assert_eq!(qr, a != 0);
-                prop_assert_eq!(opcode, b >> 3);
-                prop_assert_eq!(aa, c != 0) ;
-                prop_assert_eq!(tc, d != 0) ;
-                prop_assert_eq!(rd, e != 0) ;
-                prop_assert!(remaining.is_empty());
-                prop_assert_eq!(ra, f != 0);
-                prop_assert_eq!(z, g >> 4);
-                prop_assert_eq!(rcode, h) ;
-                prop_assert!(remaining.is_empty());
-            }
-        }
-    }
+    //    proptest! {
+    //        #[test]
+    //        fn flags_bytes(
+    //            a in arb_qr(),
+    //            b in arb_opcode(),
+    //            c in arb_aa(),
+    //            d in arb_tc(),
+    //            e in arb_rd(),
+    //            f in arb_ra(),
+    //            g in arb_z(),
+    //            h in arb_rcode())
+    //        {
+    //            let i = [a | b | c | d | e | f | g | h];
+    //            if let Ok((remaining, (qr, opcode, aa, tc, rd, ra, z, rcode))) = super::flags(&i) {
+    //                prop_assert_eq!(qr, a != 0);
+    //                prop_assert_eq!(opcode, b >> 3);
+    //                prop_assert_eq!(aa, c != 0) ;
+    //                prop_assert_eq!(tc, d != 0) ;
+    //                prop_assert_eq!(rd, e != 0) ;
+    //                prop_assert!(remaining.is_empty());
+    //                prop_assert_eq!(ra, f != 0);
+    //                prop_assert_eq!(z, g >> 4);
+    //                prop_assert_eq!(rcode, h) ;
+    //                prop_assert!(remaining.is_empty());
+    //            }
+    //        }
+    //    }
 
     prop_compose! {
         fn arb_qr()(qr in masked(0b1000_0000)) -> u8 {
