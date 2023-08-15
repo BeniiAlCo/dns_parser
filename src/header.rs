@@ -24,7 +24,7 @@ use nom::{
     error::Error,
     number::complete::be_u16,
     sequence::tuple,
-    IResult,
+    IResult, Parser,
 };
 
 #[derive(Debug, PartialEq)]
@@ -115,11 +115,14 @@ fn id(input: &[u8]) -> IResult<&[u8], u16> {
 }
 
 fn query_response(input: (&[u8], usize)) -> IResult<(&[u8], usize), QueryResponse> {
-    bool(input).map(|(remaining, query_response)| (remaining, query_response.into()))
+    bool.map(|query_response| query_response.into())
+        .parse(input)
 }
 
 fn opcode(input: (&[u8], usize)) -> IResult<(&[u8], usize), Opcode> {
-    take::<_, u8, _, _>(4usize)(input).map(|(remaining, op_code)| (remaining, op_code.into()))
+    take::<_, u8, _, _>(4usize)
+        .map(|op_code| op_code.into())
+        .parse(input)
 }
 
 fn authoritative_answer(input: (&[u8], usize)) -> IResult<(&[u8], usize), bool> {
@@ -143,8 +146,9 @@ fn z(input: (&[u8], usize)) -> IResult<(&[u8], usize), u8> {
 }
 
 fn response_code(input: (&[u8], usize)) -> IResult<(&[u8], usize), ResponseCode> {
-    take::<_, u8, _, _>(4usize)(input)
-        .map(|(remaining, response_code)| (remaining, response_code.into()))
+    take::<_, u8, _, _>(4usize)
+        .map(|response_code| response_code.into())
+        .parse(input)
 }
 
 fn flags(input: &[u8]) -> IResult<&[u8], Flags> {
@@ -157,35 +161,28 @@ fn flags(input: &[u8]) -> IResult<&[u8], Flags> {
         recursion_avaliable,
         z,
         response_code,
-    )))(input)
+    )))
     .map(
         |(
-            remaining,
-            (
-                query_response,
-                opcode,
-                authoritative_answer,
-                truncation,
-                recursion_desired,
-                recursion_avaliable,
-                _z,
-                response_code,
-            ),
-        )| {
-            (
-                remaining,
-                Flags {
-                    query_response,
-                    opcode,
-                    authoritative_answer,
-                    truncation,
-                    recursion_desired,
-                    recursion_avaliable,
-                    response_code,
-                },
-            )
+            query_response,
+            opcode,
+            authoritative_answer,
+            truncation,
+            recursion_desired,
+            recursion_avaliable,
+            _z,
+            response_code,
+        )| Flags {
+            query_response,
+            opcode,
+            authoritative_answer,
+            truncation,
+            recursion_desired,
+            recursion_avaliable,
+            response_code,
         },
     )
+    .parse(input)
 }
 
 fn question_count(input: &[u8]) -> IResult<&[u8], u16> {
@@ -212,32 +209,25 @@ fn header(input: &[u8]) -> IResult<&[u8], Header> {
         answer_count,
         nameserver_record_count,
         additional_record_count,
-    ))(input)
+    ))
     .map(
         |(
-            remaining,
-            (
-                id,
-                flags,
-                question_count,
-                answer_count,
-                nameserver_record_count,
-                additional_record_count,
-            ),
-        )| {
-            (
-                remaining,
-                Header {
-                    id,
-                    flags,
-                    question_count,
-                    answer_count,
-                    nameserver_record_count,
-                    additional_record_count,
-                },
-            )
+            id,
+            flags,
+            question_count,
+            answer_count,
+            nameserver_record_count,
+            additional_record_count,
+        )| Header {
+            id,
+            flags,
+            question_count,
+            answer_count,
+            nameserver_record_count,
+            additional_record_count,
         },
     )
+    .parse(input)
 }
 
 #[cfg(test)]
