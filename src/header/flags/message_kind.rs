@@ -14,12 +14,12 @@ impl MessageKind {
             .parse((input, INDEX))
     }
 
-    fn parse(input: &[u8]) -> Result<(&[u8], MessageKind), String> {
-        match Self::nom_parse(input) {
-            Ok(((remaining, _index), qr)) => Ok((remaining, qr)),
-            Err(_) => Err("Something went wrong :(".into()),
-        }
-    }
+    //fn parse(input: &[u8]) -> Result<MessageKind, String> {
+    //    match Self::nom_parse(input) {
+    //        Ok(((_remaining, _index), qr)) => Ok(qr),
+    //        Err(_) => Err("Something went wrong :(".into()),
+    //    }
+    //}
 }
 
 impl From<bool> for MessageKind {
@@ -39,7 +39,7 @@ mod tests {
 
     #[derive(Debug, Clone)]
     struct MessageKindByte {
-        value: u8,
+        value: [u8; 1],
         target: bool,
     }
 
@@ -51,22 +51,20 @@ mod tests {
             let masked_input = input & mask;
             let bit_target = (target as u8) << 7;
             MessageKindByte {
-                value: masked_input | bit_target,
+                value: (masked_input | bit_target).to_be_bytes(),
                 target,
             }
         }
     }
 
     #[quickcheck]
-    fn all_u16s_are_valid_message_kinds(input: MessageKindByte) -> bool {
-        let slice = &input.value.to_be_bytes();
-        MessageKind::parse(slice).is_ok()
+    fn all_u8s_are_valid_message_kinds(input: MessageKindByte) -> bool {
+        MessageKind::nom_parse(&input.value).is_ok()
     }
 
     #[quickcheck]
     fn moves_index_forward_by_one(input: MessageKindByte) -> bool {
-        let slice = &input.value.to_be_bytes();
-        if let Ok(((_, new_index), _)) = MessageKind::nom_parse(slice) {
+        if let Ok(((_, new_index), _)) = MessageKind::nom_parse(&input.value) {
             new_index == INDEX + 1
         } else {
             false
@@ -75,8 +73,7 @@ mod tests {
 
     #[quickcheck]
     fn response_is_true_query_is_false(input: MessageKindByte) -> bool {
-        let slice = &input.value.to_be_bytes();
-        if let Ok((_, qr)) = MessageKind::parse(slice) {
+        if let Ok((_, qr)) = MessageKind::nom_parse(&input.value) {
             if input.target {
                 qr == MessageKind::Response
             } else {
@@ -89,9 +86,8 @@ mod tests {
 
     #[quickcheck]
     fn does_not_consume_input(input: MessageKindByte) -> bool {
-        let slice = &input.value.to_be_bytes();
-        if let Ok((remaining, _)) = MessageKind::parse(slice) {
-            remaining == slice
+        if let Ok(((remaining, _), _)) = MessageKind::nom_parse(&input.value) {
+            remaining == input.value
         } else {
             false
         }
