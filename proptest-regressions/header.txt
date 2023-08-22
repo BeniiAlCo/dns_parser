@@ -1,8 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc daf838be32ced2ca8d58fe30b0bfb3e2ed4635a56de1f84a8d3e41f94167c98c # shrinks to a = [32]
-cc 80751bfde80839e98a6a4d5f7b3a69d4a0d97efec008cade672f96aac3af67de # shrinks to (first_id, second_id) = (0, 0), query_response = 0, opcode = 0, authoritative_answer = 0, truncation = 0, recursion_desired = 0, recursion_avaliable = 0, z = 0, response_code = 0, (first_question_count, second_question_count) = (0, 0), (first_answer_count, second_answer_count) = (0, 0), (first_nameserver_record_count, second_nameserver_record_count) = (0, 0), (first_additional_record_count, second_additional_record_count) = (0, 1)
