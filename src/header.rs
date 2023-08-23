@@ -15,8 +15,6 @@
 //    |                    ARCOUNT                    |
 //    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
-use nom::Err;
-
 #[derive(Debug, PartialEq)]
 pub struct Header {
     id: u16,
