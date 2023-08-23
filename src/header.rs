@@ -15,6 +15,8 @@
 //    |                    ARCOUNT                    |
 //    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
+use nom::Err;
+
 #[derive(Debug, PartialEq)]
 pub struct Header {
     id: u16,
@@ -34,8 +36,8 @@ pub struct Header {
 
 #[derive(Debug, PartialEq)]
 enum QueryResponse {
-    Query,
-    Response,
+    Query,    // (0)
+    Response, // (1)
 }
 
 impl From<bool> for QueryResponse {
@@ -94,42 +96,46 @@ impl From<u8> for ResponseCode {
 }
 
 impl Header {
-    fn parse(input: &[u8]) -> Self {
-        let id = Self::id(input.get(..2).unwrap());
+    fn parse(input: &[u8]) -> Result<Self, String> {
+        if input.len() < 12 {
+            Err("input is not long enough to contain a DNS header".into())
+        } else {
+            let id = Self::id(input.get(..2).unwrap());
 
-        let flag_byte_one = *input.get(2).unwrap();
+            let flag_byte_one = *input.get(2).unwrap();
 
-        let qr = Self::qr(flag_byte_one);
-        let opcode = Self::opcode(flag_byte_one);
-        let aa = Self::aa(flag_byte_one);
-        let tc = Self::tc(flag_byte_one);
-        let rd = Self::rd(flag_byte_one);
+            let qr = Self::qr(flag_byte_one);
+            let opcode = Self::opcode(flag_byte_one);
+            let aa = Self::aa(flag_byte_one);
+            let tc = Self::tc(flag_byte_one);
+            let rd = Self::rd(flag_byte_one);
 
-        let flag_byte_two = *input.get(3).unwrap();
+            let flag_byte_two = *input.get(3).unwrap();
 
-        let ra = Self::ra(flag_byte_two);
-        let z = Self::z(flag_byte_two);
-        let rcode = Self::rcode(flag_byte_two);
+            let ra = Self::ra(flag_byte_two);
+            let z = Self::z(flag_byte_two)?;
+            let rcode = Self::rcode(flag_byte_two);
 
-        let qdcount = Self::qdcount(input.get(4..6).unwrap().try_into().unwrap());
-        let ancount = Self::ancount(input.get(6..8).unwrap().try_into().unwrap());
-        let nscount = Self::nscount(input.get(8..10).unwrap().try_into().unwrap());
-        let arcount = Self::arcount(input.get(10..12).unwrap().try_into().unwrap());
+            let qdcount = Self::qdcount(input.get(4..6).unwrap().try_into().unwrap());
+            let ancount = Self::ancount(input.get(6..8).unwrap().try_into().unwrap());
+            let nscount = Self::nscount(input.get(8..10).unwrap().try_into().unwrap());
+            let arcount = Self::arcount(input.get(10..12).unwrap().try_into().unwrap());
 
-        Header {
-            id,
-            qr,
-            opcode,
-            aa,
-            tc,
-            rd,
-            ra,
-            z,
-            rcode,
-            qdcount,
-            ancount,
-            nscount,
-            arcount,
+            Ok(Header {
+                id,
+                qr,
+                opcode,
+                aa,
+                tc,
+                rd,
+                ra,
+                z,
+                rcode,
+                qdcount,
+                ancount,
+                nscount,
+                arcount,
+            })
         }
     }
 
@@ -167,8 +173,13 @@ impl Header {
         (input & 0b1000_0000) != 0
     }
 
-    fn z(input: u8) -> u8 {
-        (input & 0b0111_0000) >> 4
+    fn z(input: u8) -> Result<u8, String> {
+        let z = (input & 0b0111_0000) >> 4;
+        if z == 0 {
+            Ok(z)
+        } else {
+            Err(format!("`z` value was not `000`. Instead it was: {z}"))
+        }
     }
 
     fn rcode(input: u8) -> ResponseCode {
@@ -196,9 +207,113 @@ mod tests {
     use proptest::prelude::*;
 
     #[test]
-    fn id() {
+    fn id_is_valid_for_all_two_byte_values() {
         proptest! (|(input in [any::<u8>(); 2])| {
             Header::id(&input);
+        });
+    }
+
+    #[test]
+    fn qr_value_correct_for_all_u8_values() {
+        proptest! (|(input in any::<u8>())| {
+            let qr = Header::qr(input);
+            if (input & 0b1000_0000) == 0 {
+                prop_assert!(qr == QueryResponse::Query);
+            } else {
+                prop_assert!(qr == QueryResponse::Response);
+            }
+        });
+    }
+
+    #[test]
+    fn opcode_value_correct_for_all_u8_values() {
+        proptest! (|(input in any::<u8>())| {
+            let opcode = Header::opcode(input);
+            match (input & 0b0111_1000) >> 3 {
+                0 => prop_assert!(opcode == Opcode::Query),
+                1 => prop_assert!(opcode == Opcode::InverseQuery),
+                2 => prop_assert!(opcode == Opcode::ServerStatusRequest),
+                x if (3..=15).contains(&x) => prop_assert!(opcode == Opcode::Reserved(x)),
+                _ => prop_assert!(false),
+            }
+        });
+    }
+
+    #[test]
+    fn aa_value_correct_for_all_u8_values() {
+        proptest! (|(input in any::<u8>())| {
+            let aa = Header::aa(input);
+            if (input & 0b0000_0100) == 0 {
+                prop_assert!(!aa);
+            } else {
+                prop_assert!(aa);
+            }
+        });
+    }
+
+    #[test]
+    fn tc_value_correct_for_all_u8_values() {
+        proptest! (|(input in any::<u8>())| {
+            let tc = Header::tc(input);
+            if (input & 0b0000_0010) == 0 {
+                prop_assert!(!tc);
+            } else {
+                prop_assert!(tc);
+            }
+        });
+    }
+
+    #[test]
+    fn rd_value_correct_for_all_u8_values() {
+        proptest! (|(input in any::<u8>())| {
+            let rd = Header::rd(input);
+            if (input & 0b0000_0001) == 0 {
+                prop_assert!(!rd);
+            } else {
+                prop_assert!(rd);
+            }
+        });
+    }
+
+    #[test]
+    fn ra_value_correct_for_all_u8_values() {
+        proptest! (|(input in any::<u8>())| {
+            let ra = Header::ra(input);
+            if (input & 0b1000_0000) == 0 {
+                prop_assert!(!ra);
+            } else {
+                prop_assert!(ra);
+            }
+        });
+    }
+
+    #[test]
+    fn z_only_valid_when_zero() {
+        proptest! (|(input in any::<u8>())| {
+            let z = Header::z(input);
+            if (input & 0b0111_0000) == 0 {
+                prop_assert!(z.is_ok());
+                prop_assert!(z.unwrap() == 0);
+            } else {
+                prop_assert!(z.is_err());
+            }
+        });
+    }
+
+    #[test]
+    fn rcode_value_correct_for_all_u8_values() {
+        proptest! (|(input in any::<u8>())| {
+            let rcode = Header::rcode(input);
+            match input & 0b0000_1111 {
+                0 => prop_assert!(rcode == ResponseCode::NoError),
+                1 => prop_assert!(rcode == ResponseCode::FormatError),
+                2 => prop_assert!(rcode == ResponseCode::ServerFailure),
+                3 => prop_assert!(rcode == ResponseCode::NameError),
+                4 => prop_assert!(rcode == ResponseCode::NotImplemented),
+                5 => prop_assert!(rcode == ResponseCode::Refused),
+                x if (6..=15).contains(&x) => prop_assert!(rcode == ResponseCode::Reserved(x)),
+                _ => prop_assert!(false),
+            }
         });
     }
 }
