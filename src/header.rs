@@ -16,7 +16,7 @@
 //    +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
 #[derive(Debug, PartialEq)]
-struct Header {
+pub struct Header {
     id: u16,
     qr: QueryResponse,
     opcode: Opcode,
@@ -95,7 +95,7 @@ impl From<u8> for ResponseCode {
 
 impl Header {
     fn parse(input: &[u8]) -> Self {
-        let id = Self::id(input.get(..2).unwrap().try_into().unwrap());
+        let id = Self::id(input.get(..2).unwrap());
 
         let flag_byte_one = *input.get(2).unwrap();
 
@@ -133,8 +133,14 @@ impl Header {
         }
     }
 
-    fn id(input: &[u8; 2]) -> u16 {
-        u16::from_be_bytes(*input)
+    pub fn id(input: &[u8]) -> u16 {
+        u16::from_be_bytes(
+            input
+                .split_at(std::mem::size_of::<u16>())
+                .0
+                .try_into()
+                .unwrap(),
+        )
     }
 
     fn qr(input: u8) -> QueryResponse {
@@ -178,7 +184,21 @@ impl Header {
     fn nscount(input: [u8; 2]) -> u16 {
         u16::from_be_bytes(input)
     }
+
     fn arcount(input: [u8; 2]) -> u16 {
         u16::from_be_bytes(input)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[test]
+    fn id() {
+        proptest! (|(input in [any::<u8>(); 2])| {
+            Header::id(&input);
+        });
     }
 }

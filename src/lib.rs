@@ -1,4 +1,4 @@
 // mod message;
-mod header;
+pub mod header;
 //mod question;
 // mod resource_record;
