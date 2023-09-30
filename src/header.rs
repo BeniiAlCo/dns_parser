@@ -67,6 +67,10 @@ impl From<u8> for Opcode {
     }
 }
 
+// TODO: Make AA into an enum that is either: authoritative, non-authoritative, or not an answer?
+// TODO: Make RD into an enum that is either: desired, or undesired?
+// TODO: MAke RA into an enum that is either: avaliable, or unavaliable?
+
 #[derive(Debug, PartialEq)]
 enum ResponseCode {
     NoError,        // (0)

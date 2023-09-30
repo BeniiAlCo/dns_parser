@@ -1,4 +1,5 @@
 // mod message;
 pub mod header;
-//mod question;
+pub mod question;
+pub mod shared;
 // mod resource_record;
