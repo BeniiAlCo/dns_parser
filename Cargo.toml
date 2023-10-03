@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 
-#[dev-dependencies]
+[dev-dependencies]
 proptest = "1.2.0"
